@@ -1,7 +1,10 @@
 # #pandas
+# back propogetion
 import time
-
+import os
 import numpy as np
+import numpy.linalg as la
+import pickle
 from numbers import Number
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -15,32 +18,41 @@ import multiprocessing
 from time import sleep
 #Создали датафрейм и записали его в файл
 #-----------------------------------------------------------------------------------------------------------------------
-def read_tif(filepattern = r"D:\Diplom\test ct 13102021\raw\reconstruction\recon*.tif", imrange=(15, 487), outfn = None):
+def read_tif(filepattern , imrange=(15, 487), outfn = None):
     n = 500*500*(imrange[-1]-imrange[0])
     x = np.zeros(n, dtype='int16')
     y = np.zeros(n, dtype='int16')
     z = np.zeros(n, dtype='int16')
     intensity = np.zeros(n, dtype='float32')
     row = 0
-    for n in range(*imrange):
-        path = filepattern.replace('*', '%04d' % n)
-        #print('Reading', path)
+    for iz in range(*imrange):
+        path = filepattern.replace('*', '%04d' % iz)
+        print('Reading', path)
+        if n % 3 ==0:
+            print(n)
         image_tiff = Image.open(path)
         # image_tiff.show() # opens the tiff image. this rainbow color tiff
         imarray = np.array(image_tiff)
         # print((imarray < 0).any())
-        for i in range(500):
-            for j in range(500):
-                x[row], y[row], z[row] = i, j, n
-                intensity[row] = imarray[i][j]
-                row += 1
+        xv, yv = np.meshgrid(np.arange(500), np.arange(500), indexing='ij')
+        x[row:row+250000], y[row:row+250000] = xv.flatten(), yv.flatten()
+        z[row:row+250000] = iz
+        intensity[row:row+250000] = imarray.flatten()
+        row += 250000
+#        for i in range(500):
+#            for j in range(500):
+#                x[row], y[row], z[row] = i, j, n
+#                intensity[row] = imarray[i][j]
+#                row += 1
         df = pd.DataFrame({'x': x, 'y': y, 'z': z, 'I': intensity})
 
     print(df)
 
-   # if outfn is not None:
-       # df.to_csv(outfn)
-       # print(f'Data saved to {outfn}')
+    if outfn is not None:
+        print(f'Saving data to {outfn}...', flush=True, end='')
+        #df.to_csv(outfn)
+        df.to_pickle(outfn)
+        print('Done')
 
     return df
 
@@ -54,19 +66,19 @@ def read_csv(filename):
     print(df)
     return df
 
-def plot_im(df, project='z', x=(0, 500), y=(0, 500), z=200):
-
+def plot_im(df, project='z', x=(0, 500), y=(0, 500), z=(16,483), what='I'):
+    plt.clf()
     if project == 'z':
         if not (isinstance(x, tuple) and len(x) == 2 and
                 isinstance(y, tuple) and len(y) == 2 and
                 isinstance(z, Number)):
             print('Invalid coordinate ranges given z')
             return
-        im = df.loc[(df['x'] >= x[0]) & (df['y'] >= y[0]) & (df['x'] < x[1]) & (df['y'] < y[1]) & (df['z'] == z), 'I'].to_numpy()
+        im = df.loc[(df['x'] >= x[0]) & (df['y'] >= y[0]) & (df['x'] < x[1]) & (df['y'] < y[1]) & (df['z'] == z), what].to_numpy()
         if im.size == 0:
             print('Nothing to plot')
             return
-        im = np.reshape(im, (y[1]-y[0], x[1]-x[0]))
+        im = np.reshape(im, (y[1]-y[0], x[1]-x[0]), order='F')
         print(im)
         plt.imshow(im, extent=[*x, *y], cmap='jet')#winter  jet
         plt.colorbar()
@@ -79,7 +91,7 @@ def plot_im(df, project='z', x=(0, 500), y=(0, 500), z=200):
             print('Invalid coordinate ranges given x')
             return
 
-        im = df.loc[(df['x'] == x) & (df['y'] >= y[0]) & (df['z'] >= z[0]) & (df['y'] < y[1]) & (df['z'] <= z[1]), 'I'].to_numpy()
+        im = df.loc[(df['x'] == x) & (df['y'] >= y[0]) & (df['z'] >= z[0]) & (df['y'] < y[1]) & (df['z'] <= z[1]), what].to_numpy()
         if im.size == 0:
             print('Nothing to plot')
             return
@@ -97,7 +109,7 @@ def plot_im(df, project='z', x=(0, 500), y=(0, 500), z=200):
             print('Invalid coordinate ranges given y')
             return
 
-        im = df.loc[(df['x'] >= x[0]) & (df['y'] == y) & (df['z'] >= z[0]) & (df['x'] < x[1]) & (df['z'] <= z[1]), 'I'].to_numpy()
+        im = df.loc[(df['x'] >= x[0]) & (df['y'] == y) & (df['z'] >= z[0]) & (df['x'] < x[1]) & (df['z'] <= z[1]), what].to_numpy()
         if im.size == 0:
             print('Nothing to plot')
             return
@@ -114,93 +126,240 @@ def ctnotair(df):
     midl = df.loc[(df['x'] <= 100) & (df['y'] <= 100) & (df['z'] <= 100), 'I'].mean()
     print(midl)
     df1=df['I']- midl
-    df1.to_csv('ctnotair.csv')
+   # df1.to_csv('ctnotair.csv')
     return df1
 
-def save_image(df, project='Z'):#368
+def save_image(df, path, project='Z', what='I'):#368
+    print('11232')
     if project=='Z':
-        for z in range(368, 487):
-            plot_im(df, 'z', x=(0, 500), y=(0, 500), z=z)
-            plt.savefig('Image\Z\Z_' + str(z) + '.png')
+        for z in range(150, 300):
+            plot_im(df, 'z', x=(0, 500), y=(0, 500), z=z, what=what)
+            plt.savefig(path + '\\Z\\Z_' + str(z) + '.png')
             plt.close()
             plt.show()
     elif project =='X':
-        for i in range(368, 500):
-            plot_im(df, 'x', x=i, y=(0, 500), z=(15, 487))
-            plt.savefig('Image\X\X_' + str(i) + '.png')
+        for i in range(150, 300):
+            plot_im(df, 'x', x=i, y=(0, 500), z=(16, 483), what=what)
+            plt.savefig(path + '\\X\\X_' + str(i) + '.png')
             plt.close()
             plt.show()
     elif project =='Y':
-        for i in range(368, 500):
-            plot_im(df, 'y', x=(0, 500), y=i, z=(15, 487))
-            plt.savefig('Image\Y\Y_' + str(i) + '.png')
+        for i in range(150, 300):
+            plot_im(df, 'y', x=(0, 500), y=i, z=(16, 483), what=what)
+            plt.savefig(path + '\\Y\\Y_' + str(i) + '.png')
             plt.close()
             plt.show()
 
-def foo(q, a):
-    for i in range(10000):
-        for j in range(1000):
-            q= (q+j)-2*i
-    print(a,'hello ----------------', q)
 
-def dest_density(df, m):
-    midl = df.loc[(df['x'] <= 100) & (df['y'] <= 100) & (df['z'] <= 100), 'I'].mean()
-    df['I'] = df['I'] - midl
-    rslt_df = []
-    rslt_df = df[df['I'] > 6500]
-    h = 0.07112526539
-    N=len(rslt_df)
-    V = N * (h ** 3)
-    print(V)
-    pho = m / V
-    print(pho * 1000, 'g/sm^3')
-    S = df.loc[df['I'] > 6500, 'I'].mean()
-    k = 1000 * pho / (S)
-    print('k=', k)
-    df['I'] = df['I'] * k
+
+def dest_density(df, boundaries, ithreshold=2000, mass=None, voxelsize=None, update=False):
+    print('Calculating density...', flush=True)
+
+    if 'D' not in df.columns or update and (mass is None or voxelsize is None):
+        print('Needed parameters are not provided!')
+        return None
+
+    iair = df.loc[(df['x'] <= 100) & (df['y'] <= 100) & (df['z'] <= 100), 'I'].mean()
+
+    C = boundaries
+    selvoxels = (C[0, 0] * df['x'] + C[0, 1] * df['y'] + C[0, 2] * df['z'] < C[0, 3]) & \
+                (C[1, 0] * df['x'] + C[1, 1] * df['y'] + C[1, 2] * df['z'] < C[1, 3]) & \
+                (C[2, 0] * df['x'] + C[2, 1] * df['y'] + C[2, 2] * df['z'] < C[2, 3]) & \
+                (C[3, 0] * df['x'] + C[3, 1] * df['y'] + C[3, 2] * df['z'] < C[3, 3]) & \
+                (C[4, 0] * df['x'] + C[4, 1] * df['y'] + C[4, 2] * df['z'] < C[4, 3]) & \
+                (C[5, 0] * df['x'] + C[5, 1] * df['y'] + C[5, 2] * df['z'] < C[5, 3]) & \
+                (df['I'] > iair + ithreshold)
+
+    if 'D' not in df.columns or update:
+        N = selvoxels.sum()
+        volume = N * (voxelsize ** 3)
+        print(f"V = {volume:.1f} mm^3")
+        rho = 1000 * mass / volume  # g/cm^3
+        S = df.loc[selvoxels, 'I'].mean() - iair
+        k = rho / S
+        print('k = ', k)
+        df['D'] = (df['I'] - iair) * k
+    else:
+        rho = df.loc[selvoxels, 'D'].mean()
+
+    print(f'rho = {rho:.4f} g/cm^3')
+
+    return rho
+
+def bild_gistogramm(df):
+    df = df.hist(column='I',  bins=200)
+    print('hist')
     print(df)
-    return df
+    plt.show()
+
+def bild_plane(point):
+    vector1 = []
+    vector2 = []
+    for i in range(3):
+        print(i)
+        vector1.append(point[1][i]-point[0][i])
+        vector2.append(point[2][i]-point[1][i])
+    norm_vector=[vector1[1]*vector2[2]-vector1[2]*vector2[1],
+                 vector1[2] * vector2[0] - vector1[0] * vector2[2],
+                 vector1[0] * vector2[1] - vector1[1] * vector2[0]
+                 ]
+    arrayABCD=[norm_vector[0],norm_vector[1],norm_vector[2],
+               norm_vector[0]*point[0][0]+norm_vector[1]*point[0][1]+norm_vector[2]*point[0][2]]
+    a=math.gcd(math.gcd(arrayABCD[0], arrayABCD[1]),math.gcd(arrayABCD[2], -arrayABCD[3]))
+    arrayABCD = [i / a for i in arrayABCD]
+    #print(vector1, vector2, norm_vector, arrayABCD)
+    return arrayABCD
 
 
-m=2.24
+def var_boundaries(df, boundaries, hvard, side=0, ithreshold=2000):
+
+    assert(side < 6 and side >= 0)
+
+    nboundaries = boundaries.copy()
+    for s in range(6):
+        nboundaries[s, :] = boundaries[s, :] / la.norm(boundaries[s, :3])
+
+    nboundaries1 = nboundaries.copy()
+    nboundaries2 = nboundaries.copy()
+    nboundaries1[side, 3] -= hvard
+    nboundaries2[side, 3] += hvard
+
+    rho0 = dest_density(df, nboundaries, ithreshold)
+    rho1 = dest_density(df, nboundaries1, ithreshold)
+    rho2 = dest_density(df, nboundaries2, ithreshold)
+
+    opside = (side + 3) % 6
+
+    r1 = nboundaries[side, 3] * nboundaries[side, :3]
+    r2 = nboundaries[opside, 3] * nboundaries[opside, :3]
+    a = abs(np.dot(nboundaries[side, :3], (r2-r1)))
+
+    varrho = abs(rho2-rho1)/rho0
+    vardist = 2*hvard/a
+    print(f'Side {side}: varrho={varrho:.4f}, vardist={vardist:.4f}, varrho/vardist={varrho/vardist:.2f}')
+
+    return varrho, varrho/vardist
+
 
 
 if __name__ == '__main__':
     timer = time.time()
-    df = read_csv('ct.csv')
+
+    updateDataframe = False
+    updateDensity = False
+
+    #point= [[79,374,66],[370,412,66],[224,392,440]]
+    #bild_plane(point)
+    ABCD= [103598., 11968., -1689., 93150602]
+    Axyz=[[79,374,66],
+          [370,412,66],
+          [402,135,66],
+          [124,98,66]]
+
+
+    dirs = ['Aerogel 4-layer CT 030222 1', 'Aerogel 4-layer CT 030222 2',
+            'Aerogel 4-layer CT Mo 030222', 'Aerogel 4-layer CT Mo 030222 3frames']
+    d = dirs[0]
+
+    ### Parameters for "Aerogel 4-layer CT 030222 1"
+    mass = 4.77 # gram
+
+    boundaries = np.array([[-418., 3201., 8., 1164680], [103598., 11968., -1689., 43150602], [0., 0., -1., -33.],
+                           [629., -4726., - 8., -385680], [-1564., -255., 9., -218332], [0., 0., 1., 482.]])
+    # boundaries = np.array([[629., -4726., - 8., -385680],
+    #                        [103598., 11968., -1689., 43150602],
+    #                        [-418., 3201., 8., 1164680],
+    #                        [-1564., -255., 9., -218332],
+    #                        [0., 0., -1., -33.], [0., 0., 1., 482.]])
+    # boundaries = np.array([[-418., 3201., 8., 1164680], [103598., 11968., -1689., 93150602],
+    #                        [629., -4726., - 8., -385680], [-1564., -255., 9., -218332],
+    #                        [0., 0., -1., -33.], [0., 0., 1., 482.]])
+
+
+    voxelsize = 0.08231293 # size of voxel [mm]
+    ithreshold = 2000
+    hvard = 5
+    ###
+   # df = pd.read_pickle('Aerogel_4 - layer_CT_030222_1_bhc0.pkl')
+   # print(df)
+
+    bhcs = ['0', '0.05', '0.1', '0.15']
+
+    for bhc in bhcs[:1]:
+        filepattern = rf"D:\Diplom\{d}\raw\reconstruction bhc{bhc}\recon*.tif"
+        outfn = d.replace(' ', '_') + f'_bhc{bhc}.pkl'
+
+        if not os.access(outfn, os.R_OK) or updateDataframe:
+            df = read_tif(filepattern, imrange=(16, 483), outfn=outfn)
+
+        else:
+            print(f'Reading {outfn}...', flush=True, end='')
+            df = pd.read_pickle(outfn)
+            print('Done')
+
+        if 'D' not in df.columns or updateDensity:
+            dest_density(df, boundaries, ithreshold, mass, voxelsize, update=updateDensity)
+            print(f'Saving {outfn}...', flush=True, end='')
+            df.to_pickle(outfn)
+            print('Done')
+        else:
+            print('Density data are already in the dataframe')
+
+        for side in range(6):
+            varrho, varrho_over_vardist = var_boundaries(df, boundaries, hvard, side, ithreshold)
+
+        #print(df)
+
+    print('------------')
+   #  plot_im(df, 'z', z=240)
+   # # plot_im(df, 'y', y=200, what='D')
+   #  plt.show()
+
+
+  #  obj = df.loc[ (-10704 * df['x'] + 96302 * df['y'] + 1779 * df['z'] > 8486562)]
+   # bildgistogramm(df)
+    #df = read_csv('ct.csv')
     #df = read_tif(imrange=(15, 487), outfn='ct.csv')
-    df= dest_density(df,m)
-    print(df)
+    #df= dest_density(df,m)
+
     # pool= multiprocessing.Pool(processes=3)
-    # pool.map(save_image,[(df, 'X'),(df, 'Y'),(df, 'Z')])
+    # p1 = multiprocessing.Process(target=save_image, args=(df, d, 'X', 'D'))
+    # p2 = multiprocessing.Process(target=save_image, args=(df, d, 'Y', 'D'))
+    # p3 = multiprocessing.Process(target=save_image, args=(df, d, 'Z', 'D'))
+    # p1.start()
+    # p2.start()
+    # p3.start()
+    #
+    # p1.join()
+    # p2.join()
+    # p3.join()
 
-    p1 = multiprocessing.Process(target=save_image, args=(df, 'X',))
-    p2 = multiprocessing.Process(target=save_image, args=(df, 'Y',))
-    p3 = multiprocessing.Process(target=save_image, args=(df, 'Z',))
-    p1.start()
-    p2.start()
-    p3.start()
-
-    p1.join()
-    p2.join()
-    p3.join()
-
-    print(time.time() - timer)
-
-# def myfunc(a, b):
-#     print('сумма :',a + b)
-# thr1 = threading.Thread(target = myfunc, args = (1, 7)).start()
-# print('основной поток')
-
-# np.random.seed(123)
+    print(f'Processing time: {time.time() - timer:.1f} seconds')
+# df = read_csv('3D.csv')
+# df = df.loc[df['I'] > 1.28]
+# df = df.loc[df['I'] < 1.30]
+# df = df.reset_index(drop=True)
+# print(df)
+# for i in range(0, 45000):
+#     if i % 3 == 0:
+#         df.drop(axis=0, index=i, inplace=True)
 #
-# x = np.random.randint(-5, 5, 40)
-# y = np.random.randint(0, 10, 40)
-# z = np.random.randint(-5, 5, 40)
-# s = np.random.randint(10., 100., 40)
-#df = read_csv('ct.csv')
-df = read_csv('3D.csv')
-#df = read_tif(imrange=(15, 150), outfn='ct.csv')
+# # df.drop(axis=0,index=(df['I'] > 6500), inplace=True)
+# print(df)
+# # df.to_csv('3D.csv')
+# x = df['x']
+# y = df['y']
+# z = df['z']
+# s = df['I']
+#
+# fig = plt.figure()
+# ax = fig.add_subplot(111, projection='3d')
+# ax.scatter(x, y, z, s=s)
+# plt.show()
+
+
+
+# df = read_tif(imrange=(15, 150), outfn='ct.csv')
 # midl = df.loc[(df['x'] <= 100) & (df['y'] <= 100) & (df['z'] <= 100), 'I'].mean()
 # df['I'] = df['I'] - midl
 # rslt_df = []
@@ -216,27 +375,8 @@ df = read_csv('3D.csv')
 # print('k=', k)
 # k=4.7097355512420514e-05
 # # df['I'] = df['I'] * k
-#
-# df=df.loc[df['I']>1.28]
-# df=df.loc[df['I']<1.30]
-# df=df.reset_index(drop=True)
-# print(df)
-# for i in range(0,45000):
-#     if i%3 ==0:
-#         df.drop(axis=0, index=i, inplace=True)
-#
-# #df.drop(axis=0,index=(df['I'] > 6500), inplace=True)
-# print(df)
-# #df.to_csv('3D.csv')
-# x = df['x']
-# y = df['y']
-# z = df['z']
-# s = df['I']
-#
-# fig = plt.figure()
-# ax = fig.add_subplot(111, projection='3d')
-# ax.scatter(x, y, z, s=s)
-# plt.show()
+
+
 
 
 
