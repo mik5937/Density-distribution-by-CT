@@ -1,5 +1,3 @@
-# #pandas
-# back propogetion
 import time
 import os
 import numpy as np
@@ -130,9 +128,8 @@ def ctnotair(df):
     return df1
 
 def save_image(df, path, project='Z', what='I'):#368
-    print('11232')
     if project=='Z':
-        for z in range(150, 300):
+        for z in range(338, 483):
             plot_im(df, 'z', x=(0, 500), y=(0, 500), z=z, what=what)
             plt.savefig(path + '\\Z\\Z_' + str(z) + '.png')
             plt.close()
@@ -154,43 +151,63 @@ def save_image(df, path, project='Z', what='I'):#368
 
 def dest_density(df, boundaries, ithreshold=2000, mass=None, voxelsize=None, update=False):
     print('Calculating density...', flush=True)
-
-    if 'D' not in df.columns or update and (mass is None or voxelsize is None):
-        print('Needed parameters are not provided!')
+    # if 'D' not in df.columns or  update and (mass is None or voxelsize is None):
+    #     print('Needed parameters are not provided!')
+    #     return None
+    if not update or (mass is None or voxelsize is None):
+        print('Needed parameters are not provided or update = False!')
         return None
 
     iair = df.loc[(df['x'] <= 100) & (df['y'] <= 100) & (df['z'] <= 100), 'I'].mean()
 
     C = boundaries
-    selvoxels = (C[0, 0] * df['x'] + C[0, 1] * df['y'] + C[0, 2] * df['z'] < C[0, 3]) & \
-                (C[1, 0] * df['x'] + C[1, 1] * df['y'] + C[1, 2] * df['z'] < C[1, 3]) & \
-                (C[2, 0] * df['x'] + C[2, 1] * df['y'] + C[2, 2] * df['z'] < C[2, 3]) & \
-                (C[3, 0] * df['x'] + C[3, 1] * df['y'] + C[3, 2] * df['z'] < C[3, 3]) & \
-                (C[4, 0] * df['x'] + C[4, 1] * df['y'] + C[4, 2] * df['z'] < C[4, 3]) & \
-                (C[5, 0] * df['x'] + C[5, 1] * df['y'] + C[5, 2] * df['z'] < C[5, 3]) & \
-                (df['I'] > iair + ithreshold)
+    inside = (C[0, 0] * df['x'] + C[0, 1] * df['y'] + C[0, 2] * df['z'] < C[0, 3]) & \
+             (C[1, 0] * df['x'] + C[1, 1] * df['y'] + C[1, 2] * df['z'] < C[1, 3]) & \
+             (C[2, 0] * df['x'] + C[2, 1] * df['y'] + C[2, 2] * df['z'] < C[2, 3]) & \
+             (C[3, 0] * df['x'] + C[3, 1] * df['y'] + C[3, 2] * df['z'] < C[3, 3]) & \
+             (C[4, 0] * df['x'] + C[4, 1] * df['y'] + C[4, 2] * df['z'] < C[4, 3]) & \
+             (C[5, 0] * df['x'] + C[5, 1] * df['y'] + C[5, 2] * df['z'] < C[5, 3])
+    selected = inside & (df['I'] > iair + ithreshold)
 
-    if 'D' not in df.columns or update:
-        N = selvoxels.sum()
+    allreco = all([what in df.columns for what in ('D', 'n', 'inside', 'selected')])
+
+    if not allreco or update:
+        alf400 = 0.438  # cm^3/g
+        N = selected.sum()
         volume = N * (voxelsize ** 3)
         print(f"V = {volume:.1f} mm^3")
         rho = 1000 * mass / volume  # g/cm^3
-        S = df.loc[selvoxels, 'I'].mean() - iair
+        S = df.loc[selected, 'I'].mean() - iair
         k = rho / S
         print('k = ', k)
         df['D'] = (df['I'] - iair) * k
+        df['n'] = np.sqrt(1.+alf400*df['D'])
+        df['inside'] = inside
+        df['selected'] = selected
+        print(df)
     else:
-        rho = df.loc[selvoxels, 'D'].mean()
+        rho = df.loc[selected, 'D'].mean()
 
     print(f'rho = {rho:.4f} g/cm^3')
 
     return rho
 
-def bild_gistogramm(df):
-    df = df.hist(column='I',  bins=200)
+def bild_gistogramm(df, what):
+    df = df.hist(column=what,  bins=500)
+    # plt.xlim(xmin=0.97)
+    # plt.xlim(xmax=1.09)
+    plt.xlim(xmin=0.98)
+    plt.xlim(xmax=1.09)
+    plt.ylim(ymax=0.65*10**6)
+    #plt.yscale('log')
+    #plt.xscale('log')
+    plt.xlabel('n')
+    plt.ylabel('количество вокселей')
     print('hist')
     print(df)
+    plt.savefig('histogramm.png')
     plt.show()
+
 
 def bild_plane(point):
     vector1 = []
@@ -241,6 +258,57 @@ def var_boundaries(df, boundaries, hvard, side=0, ithreshold=2000):
     return varrho, varrho/vardist
 
 
+def plot1d(df, point1, point2,bhcs, radius=5, step=2, voxelsize=1, what='D', addplot=True):
+    print(f'Plotting 1D density distribution between {point1} and {point2} with radius {radius} and step {step}...')
+    v = point2 - point1
+    v = v / la.norm(v)
+    voxels = df.loc[:, ('x', 'y', 'z')].to_numpy()
+    cv = np.cross(voxels - point1, v)
+    distance = la.norm(cv, axis=1)
+    inside = (distance < radius) & df['inside']
+    s = (np.dot(voxels[inside, :] - point1, v) // step) * step * voxelsize
+    rho = df.loc[inside, what].groupby(s).mean()
+    if not addplot:
+        plt.clf()
+    df1D = pd.DataFrame({'X': 1, 'N': rho})
+    df1D.to_csv('1DdestribU.csv')
+    plt.plot(rho.index, rho, '-', label=f'{point1}-{point2}, {bhcs}')
+    plt.xlabel('X (mm)')
+    plt.ylabel('показатель преломления')
+    print(df1D)
+    plt.legend()
+    # plt.ylim((0, 1.1*rho.max()))
+    if not addplot:
+        plt.show()
+
+
+def plot1dtomanydf(alldf,point,bhcs,d):
+    for i in range(len(alldf)):
+        plot1d(alldf[i], point[0], point[1],bhcs[i],radius=5, step=2, voxelsize=voxelsize, what='n', addplot=True)
+    plt.savefig(d+"\\1D распределение\\"+d + rf"{point[0]}-{point[1]}" + '.png')
+    plt.close()
+    plt.show()
+def plot1d_all_lauer(alldf,points,bhcs,d):
+    for i in range(4):
+        for j in range(4):
+           # print(alldf[i])
+            point = points[j]
+            plot1d(alldf[i], point[0], point[1],bhcs[i],radius=5, step=2, voxelsize=voxelsize, what='n', addplot=True)
+        plt.savefig(d+"\\1D распределение\\lauer_bhc\\" + d + rf"  bhc{bhcs[i]}" + '.png')
+        plt.close()
+        plt.show()
+
+def test (df,C):
+    inside = df.loc[((C[0, 0] * df['x'] + C[0, 1] * df['y'] + C[0, 2] * df['z'] < C[0, 3]) & \
+             (C[1, 0] * df['x'] + C[1, 1] * df['y'] + C[1, 2] * df['z'] < C[1, 3]) & \
+             (C[2, 0] * df['x'] + C[2, 1] * df['y'] + C[2, 2] * df['z'] < C[2, 3]) & \
+             (C[3, 0] * df['x'] + C[3, 1] * df['y'] + C[3, 2] * df['z'] < C[3, 3]) &  ###верх
+             (C[4, 0] * df['x'] + C[4, 1] * df['y'] + C[4, 2] * df['z'] < C[4, 3]) & #лево
+             (C[5, 0] * df['x'] + C[5, 1] * df['y'] + C[5, 2] * df['z'] < C[5, 3])), 'I']=0
+    plot_im(df, 'z', z=240)
+    plt.show()
+
+
 
 if __name__ == '__main__':
     timer = time.time()
@@ -248,8 +316,6 @@ if __name__ == '__main__':
     updateDataframe = False
     updateDensity = False
 
-    #point= [[79,374,66],[370,412,66],[224,392,440]]
-    #bild_plane(point)
     ABCD= [103598., 11968., -1689., 93150602]
     Axyz=[[79,374,66],
           [370,412,66],
@@ -258,34 +324,63 @@ if __name__ == '__main__':
 
 
     dirs = ['Aerogel 4-layer CT 030222 1', 'Aerogel 4-layer CT 030222 2',
-            'Aerogel 4-layer CT Mo 030222', 'Aerogel 4-layer CT Mo 030222 3frames']
-    d = dirs[0]
+            'Aerogel 4-layer CT Mo 030222', 'Aerogel 4-layer CT Mo 030222 3frames','Aerogel Zr 6% R (rho=0.2) Mo glass 3.2mm 5 frames',
+            'Aerogel Zr 6% U (rho=0.115) Mo glass 3.2 mm 5 frames', 'Aerogel 4-layer Mo  glass 3.2mm 5 frames 130522']
+
 
     ### Parameters for "Aerogel 4-layer CT 030222 1"
-    mass = 4.77 # gram
+    # mass = 4.77 # gram
+    # d = dirs[0]
+    # boundaries = np.array([[-418., 3201., 8., 1164680], [103598., 11968., -1689., 43150602], [0., 0., -1., -33.],
+    #                        [629., -4726., - 8., -385680], [-1564., -255., 9., -218332], [0., 0., 1., 482.]])
 
-    boundaries = np.array([[-418., 3201., 8., 1164680], [103598., 11968., -1689., 43150602], [0., 0., -1., -33.],
-                           [629., -4726., - 8., -385680], [-1564., -255., 9., -218332], [0., 0., 1., 482.]])
-    # boundaries = np.array([[629., -4726., - 8., -385680],
-    #                        [103598., 11968., -1689., 43150602],
-    #                        [-418., 3201., 8., 1164680],
-    #                        [-1564., -255., 9., -218332],
-    #                        [0., 0., -1., -33.], [0., 0., 1., 482.]])
-    # boundaries = np.array([[-418., 3201., 8., 1164680], [103598., 11968., -1689., 93150602],
-    #                        [629., -4726., - 8., -385680], [-1564., -255., 9., -218332],
-    #                        [0., 0., -1., -33.], [0., 0., 1., 482.]])
+#############################################################################
+    ##Parameters for "Aerogel 4-layer CT Mo 030222"
 
+    # mass = 4.77  # gram
+    # d = dirs[2]
+    # boundaries = np.array([[3800.,59400.,13.,24570320.], [27800.,-1900.,-913.,10163680.], [0., 0., -1., -33.],
+    #                        [-3000.,-56200.,-1081.,-7584440.], [-18800.,200.,227.,-1800520.], [0., 0., 1., 482.]])
+
+    ### Parameters for "Aerogel 4-layer CT Mo 030222 3frames"
+    # mass = 4.77  # gram
+    # d = dirs[3]
+    # boundaries = np.array([[3400.,59000.,627.,24579480.], [56200.,-3000.,-901.,21090760.], [0., 0., -1., -33.],
+    #                        [-3400.,-56200.,379.,-7400040.], [-5620.,20.,71.,-564900.], [0., 0., 1., 482.]])
+
+    ### Parameters for "Aerogel Zr 6% R (rho=0.2) Mo glass 3.2mm 5 frames"
+    # mass = 1.73  # gram
+    # d = dirs[4]
+    # boundaries = np.array([[0.,1.,0.,385.], [1.,0.,0.,383.], [0., 0., -1., -337.],
+    #                        [0.,-1.,0.,-127.], [-1.,0.,0.,-126.], [0., 0., 1., 482.]])
+
+    ### Parameters for "Aerogel Zr 6% U (rho=0.2) Mo glass 3.2mm 5 frames"
+    mass = 0.79  # gram
+    d = dirs[5]
+    boundaries = np.array([[0., 1., 0., 385.], [1., 0., 0., 383.], [0., 0., -1., -337.],
+                           [0., -1., 0., -127.], [-1., 0., 0., -126.], [0., 0., 1., 482.]])
+
+    #####  Aerogel 4-layer Mo  glass 3.2mm 5 frames 130522
+    # mass = 4.77  # gram
+    # d = dirs[6]
+    # boundaries = np.array([[0., 1., 0., 383.], [1., 0., 0., 431.], [0., 0., -1., -33.],
+    #                        [0., -1., 0., -75.], [-1., 0., 0., -112.], [0., 0., 1., 482.]])
 
     voxelsize = 0.08231293 # size of voxel [mm]
     ithreshold = 2000
     hvard = 5
     ###
    # df = pd.read_pickle('Aerogel_4 - layer_CT_030222_1_bhc0.pkl')
-   # print(df)
+
 
     bhcs = ['0', '0.05', '0.1', '0.15']
 
-    for bhc in bhcs[:1]:
+
+    alldf= [None]*len(bhcs)
+    print(alldf)
+    i = 0
+    for bhc in bhcs:
+
         filepattern = rf"D:\Diplom\{d}\raw\reconstruction bhc{bhc}\recon*.tif"
         outfn = d.replace(' ', '_') + f'_bhc{bhc}.pkl'
 
@@ -296,8 +391,13 @@ if __name__ == '__main__':
             print(f'Reading {outfn}...', flush=True, end='')
             df = pd.read_pickle(outfn)
             print('Done')
+            print(df)
+            alldf[i] = df
+            i += 1
 
-        if 'D' not in df.columns or updateDensity:
+        allreco = all([what in df.columns for what in ('D', 'n', 'inside', 'selected')])
+
+        if not allreco or updateDensity:
             dest_density(df, boundaries, ithreshold, mass, voxelsize, update=updateDensity)
             print(f'Saving {outfn}...', flush=True, end='')
             df.to_pickle(outfn)
@@ -305,27 +405,36 @@ if __name__ == '__main__':
         else:
             print('Density data are already in the dataframe')
 
-        for side in range(6):
-            varrho, varrho_over_vardist = var_boundaries(df, boundaries, hvard, side, ithreshold)
+    bild_gistogramm(alldf[2],'n')
+        ##### РАспределение  в каждом слое
+    dp1 = np.array([[0, 300, 90], [500, 250, 90]])
+    dp2 = np.array([[0, 300, 170], [500, 250, 170]])
+    dp3 = np.array([[0, 300, 280], [500, 250, 280]])
+    dp4 = np.array([[0, 300, 380], [500, 250, 380]])
+    point = [dp1, dp2, dp3, dp4]
 
-        #print(df)
+    dz1 = np.array([[250, 250, 20], [250, 250, 383]])
+    # plot1dtomanydf(alldf, dz1, bhcs, d)
+    # plot1d_all_lauer(alldf, point, bhcs, d)
+    # plot1dtomanydf(alldf, dp1, bhcs, d)
+    # plot1dtomanydf(alldf, dp2, bhcs, d)
+    # plot1dtomanydf(alldf, dp3, bhcs, d)
+    # plot1dtomanydf(alldf, dp4, bhcs, d)
+    #plot1d(alldf[2],dz1[0],dz1[1],bhcs[2], what = 'n', voxelsize=voxelsize, step=3) # распределения по оси Z
+   # plot1dtomanydf(alldf[2], dz1, bhcs, d)
 
+    #test(df,boundaries)
     print('------------')
-   #  plot_im(df, 'z', z=240)
-   # # plot_im(df, 'y', y=200, what='D')
-   #  plt.show()
+    #plot_im(df, 'y', y=220, what='D')
+    #plot_im(df, 'z', z=400)
+    #
+    plt.show()
 
-
-  #  obj = df.loc[ (-10704 * df['x'] + 96302 * df['y'] + 1779 * df['z'] > 8486562)]
-   # bildgistogramm(df)
-    #df = read_csv('ct.csv')
-    #df = read_tif(imrange=(15, 487), outfn='ct.csv')
-    #df= dest_density(df,m)
-
+    #save_image(alldf[0],d,'Z','D')
     # pool= multiprocessing.Pool(processes=3)
-    # p1 = multiprocessing.Process(target=save_image, args=(df, d, 'X', 'D'))
-    # p2 = multiprocessing.Process(target=save_image, args=(df, d, 'Y', 'D'))
-    # p3 = multiprocessing.Process(target=save_image, args=(df, d, 'Z', 'D'))
+    # p1 = multiprocessing.Process(target=save_image, args=(alldf[0], d, 'X', 'D'))
+    # p2 = multiprocessing.Process(target=save_image, args=(alldf[0], d, 'Y', 'D'))
+    # p3 = multiprocessing.Process(target=save_image, args=(alldf[0], d, 'Z', 'D'))
     # p1.start()
     # p2.start()
     # p3.start()
@@ -335,243 +444,3 @@ if __name__ == '__main__':
     # p3.join()
 
     print(f'Processing time: {time.time() - timer:.1f} seconds')
-# df = read_csv('3D.csv')
-# df = df.loc[df['I'] > 1.28]
-# df = df.loc[df['I'] < 1.30]
-# df = df.reset_index(drop=True)
-# print(df)
-# for i in range(0, 45000):
-#     if i % 3 == 0:
-#         df.drop(axis=0, index=i, inplace=True)
-#
-# # df.drop(axis=0,index=(df['I'] > 6500), inplace=True)
-# print(df)
-# # df.to_csv('3D.csv')
-# x = df['x']
-# y = df['y']
-# z = df['z']
-# s = df['I']
-#
-# fig = plt.figure()
-# ax = fig.add_subplot(111, projection='3d')
-# ax.scatter(x, y, z, s=s)
-# plt.show()
-
-
-
-# df = read_tif(imrange=(15, 150), outfn='ct.csv')
-# midl = df.loc[(df['x'] <= 100) & (df['y'] <= 100) & (df['z'] <= 100), 'I'].mean()
-# df['I'] = df['I'] - midl
-# rslt_df = []
-# rslt_df = df[df['I'] > 6500]
-# h = 0.07112526539
-# N=len(rslt_df)
-# V = N * (h ** 3)
-# print(V)
-# pho = m / V
-# print(pho * 1000, 'g/sm^3')
-# S = df.loc[df['I'] > 6500, 'I'].mean()
-# k = 1000 * pho / (S)
-# print('k=', k)
-# k=4.7097355512420514e-05
-# # df['I'] = df['I'] * k
-
-
-
-
-
-# # df = read_csv('density_in_point4.csv')
-# # print(df)
-# # for x in range(150,200):
-# #     plot_im(df, 'z', x=(0,500), y=(0,500), z=x)
-#
-# #df = read_csv('ct.csv')
-# df = read_csv('density_in_point3.csv')
-# df1= read_csv('ctnotair.csv')
-# #midl = df.loc[(df['x'] <= 100) & (df['y'] <= 100) & (df['z'] <= 100), 'I'].mean()
-# #print(df1)
-# rslt_df = []
-# rslt_df = df1[df1['I'] > 6500]
-# #S= df1[df1['I'] > 6500].sum()
-#
-# print(len(rslt_df))
-# #print(midl)
-# h=0.07112526539
-# #N=len(rslt_df)
-# N=5025465
-# V=N*(h**3)
-# print(V)
-# m=2.24
-# pho= m/V
-# print(pho*1000, 'g/sm^3')
-#
-# #rslt_df = df[df['I'] > 6500+midl]
-# S2= df1.loc[df1['I'] > 6500, 'I'].mean()
-# #S= df.loc[df['I'] > 6500+midl, 'I'].mean()
-# #print('Sср=',S)
-#
-# k=1000*pho/(S2)
-# print('k=',k)
-# df['I']=df1['I']*k
-# print(df1)
-# print(df)
-
-
-
-#df1.to_csv('density_in_point4.csv')
-
-
-# for x in range(150,200):
-#     plot_im(df, 'x', x=x, y=(0,500), z=(150, 300))
-
-#df = read_csv('ct.csv')
-#print(df)
-
-
-
-
-# df['№'] = int
-# df['X'] = X
-# df['Y'] = Y
-#
-# #print(df.iloc[1])
-# df.to_csv('Intensity.csv')
-#-----------------------------------------------------------------------------------------------
-
-# Найдем интенсивность воздуха из объема 100х100х100
-#-------------------------------------------------------------------------------------------
-# df = pd.read_csv('Intensity.csv')
-# pho_mid=0
-# index=0
-# for z in range(100):
-#     if z!=0:
-#         index+=200500
-#
-#     for x in range(100):
-#         if x != 0:
-#             index+=400
-#         for y in range(100):
-#             if y != 0:
-#                 index += 1
-#             #print(index)
-#             pho_mid += df.iloc[index]['№']
-# print(pho_mid/(100*100*100))
-#---------------------------------------------------12161.213 - средняя интенсивность в воздухе
-
-#Ищем пиксили с высокой плотностью
-#-----------------------------------------------------------------------------
-
-# df = pd.read_csv('Intensity1.csv')
-# df1 = pd.DataFrame()
-# #df["№-air"]=None
-# #print(df.iloc[1])
-# pho=[]
-# for i in range(117999999+1):
-#     pho.append(df.iloc[i]['№']-12198.10957)
-#     if i % 1000000==0:
-#         print(i)
-# #print(pho)
-# df1['№-air'] = pho
-# df1.to_csv('Intensity2.csv')
-
-#------------------------------------------------------------------------------------
-
-# 0,07112526539- размер 1 стороны вокселя
-
-# найдем сколько точек имеют интенсивность более 6500 (№-air > 6500)
-#-------------------------------------------------------------------------------------------
-#df = pd.read_csv('Intensity2.csv')
-# rslt_df = []
-# rslt_df = df[df['№-air'] > 6500]
-# print(len(rslt_df))
-#-------------------------------------------------------------------------------------------
-#1484294- количество точек оъекта
-
-
-#Посчитаем обьем фигуры V= 534.0619431396051 mm^3
-#-------------------------------------------------------------------------------------------
-# h=0.07112526539
-# N=len(rslt_df)
-# V=N*(h**3)
-# print(V)
-# m=2.24
-# pho= m/V
-# print(pho*1000, 'g/sm^3')
-# pho =4.194270025742049 g/sm^3
-#-------------------------------------------------------------------------------------------
-
-
-
-# Средняя интенсивность обьекта
-#-------------------------------------------------------------------------------------------
-# S=0
-# for i in range(117999999+1):
-#     if df.iloc[i]['№-air'] >6500:
-#         S+=(df.iloc[i]['№-air'])
-#     if i % 1000000==0:
-#         print(i)
-# print(S)
-# print(S/1484294) # 13676.819949033594- средняя интенсивность обьекта
-#-------------------------------------------------------------------------------------------
-# df = pd.read_csv('Intensity2.csv')
-# df1 = pd.DataFrame()
-# dens=[]
-# K=4.194270025742049/13676.819949033594
-# for i in range(117999999+1):
-#
-#     dens.append(df.iloc[i]['№-air']*K)
-#     if i % 1000000==0:
-#         print(i)
-# df1['Density'] = dens
-# df1.to_csv('density.csv')
-#print(df1)
-
-
-
-#print(df)
-# Intensiviti=25000
-# k=0                 [13069 11934 13331 ... 13262 12978 10457]
-#  [ 9654 13583 10851
-# for n in range(500):
-#     for m in range(500):
-#         if array[1][m][n] >k:
-#             k= array[1][m][n]
-#         if array[1][m][n]<Intensiviti:
-#             array[1][m][n]=0
-# for n in range(500):
-#     for m in range(500):
-#         if imarray[m][n] >k:
-#             k= imarray[m][n]
-#         if imarray[m][n]<Intensiviti:
-#             imarray[m][n]=0
-#         #imarray[m][n]=20000
-# print(imarray)
-# print(k)
-# pillow_image=Image.fromarray(array[1])
-# pillow_image.show()
-# pillow_image=Image.fromarray(array[0])
-# pillow_image.show()
-# pillow_image=Image.fromarray(array[2])
-# pillow_image.show()
-#
-#
-# def read(fileName):
-#     f = open(fileName, "r")
-#     return [list(map(int, i.split())) for i in f.readlines()]
-#
-#
-# def write(array, fileName):
-#     f = open(fileName, "w")
-#     for i in array:
-#         print(" ".join(map(str, i)), file=f)
-#
-#
-# fileName = "input.txt"
-# a = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
-# write(imarray, fileName)
-# #b = read(fileName)
-# b = np.array([[1.5, 2, 3], [4, 5, 6]])
-# print(b[1][2])
-#
-#
-#
